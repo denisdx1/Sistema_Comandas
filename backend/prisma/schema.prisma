@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // o mysql/sqlite si lo prefieres
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id                    Int                    @id @default(autoincrement())
+  nombre                String
+  email                 String                 @unique
+  password              String
+  telefono              String? // Campo telefono opcional
+  rolId                 Int
+  rol                   Rol                    @relation(fields: [rolId], references: [id])
+  ordenes               Orden[] // ordenes creadas por el mozo
+  movimientos           MovimientoInventario[] // relación inversa para movimientos
+  cajasAbiertas         Caja[]                 @relation("CajaApertura") // cajas abiertas por el usuario
+  cajasCerradas         Caja[]                 @relation("CajaCierre") // cajas cerradas por el usuario
+  movimientosCaja       MovimientoCaja[]       @relation("MovimientosCaja") // movimientos de caja realizados por el usuario
+  asignacionesBartender AsignacionTrabajo[]    @relation("BartenderAsignaciones") // asignaciones como bartender
+  asignacionesMozo      AsignacionTrabajo[]    @relation("MozoAsignaciones") // asignaciones como mozo
+}
+
+model Rol {
+  id       Int       @id @default(autoincrement())
+  nombre   String    @unique // MOZO, BARTENDER, CAJERO
+  usuarios Usuario[]
+}
+
+model Categoria {
+  id          Int        @id @default(autoincrement())
+  nombre      String     @unique
+  descripcion String? // Añadimos el campo descripción como opcional
+  productos   Producto[]
+}
+
+model Producto {
+  id             Int                    @id @default(autoincrement())
+  nombre         String
+  precio         Decimal                @db.Decimal(10, 2)
+  stock          Int                    @default(0)
+  categoriaId    Int
+  categoria      Categoria              @relation(fields: [categoriaId], references: [id])
+  tipoComplemento TipoComplemento       @default(NO_ES_COMPLEMENTO)
+  ordenItems     OrdenItem[]
+  movimientos    MovimientoInventario[]
+  comboProductos ComboProducto[]
+  promociones    PromocionProducto[]
+}
+
+model Orden {
+  id              Int              @id @default(autoincrement())
+  mozoId          Int
+  mozo            Usuario          @relation(fields: [mozoId], references: [id])
+  estado          EstadoOrden
+  createdAt       DateTime         @default(now())
+  items           OrdenItem[]
+  notas           String?
+  movimientosCaja MovimientoCaja[]
+}
+
+model OrdenItem {
+  id                       Int              @id @default(autoincrement())
+  cantidad                 Int
+  orden                    Orden            @relation(fields: [ordenId], references: [id])
+  ordenId                  Int
+  producto                 Producto?        @relation(fields: [productoId], references: [id])
+  productoId               Int?
+  combo                    Combo?           @relation(fields: [comboId], references: [id])
+  comboId                  Int?
+  promocion                PromocionTragos? @relation(fields: [promocionId], references: [id])
+  promocionId              Int?
+  esPromocionPersonalizada Boolean          @default(false)
+  esComplemento            Boolean          @default(false)
+  tipoComplemento          TipoComplemento  @default(NO_ES_COMPLEMENTO)
+  productoAsociadoId       Int?             // ID del producto principal al que está asociado este complemento
+  nombre                   String?
+  precio                   Decimal?         @db.Decimal(10, 2)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @default(now())
+}
+
+model MovimientoInventario {
+  id            Int            @id @default(autoincrement())
+  tipo          TipoMovimiento
+  cantidad      Int
+  motivo        String?
+  productoId    Int
+  producto      Producto       @relation(fields: [productoId], references: [id])
+  usuarioId     Int
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
+  stockAnterior Int
+  stockNuevo    Int
+  fechaHora     DateTime       @default(now())
+}
+
+model Sucursal {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  direccion String?
+  telefono  String?
+  activa    Boolean  @default(true)
+  cajas     Caja[] // Relación con cajas
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Caja {
+  id                Int                 @id @default(autoincrement())
+  estado            EstadoCaja          @default(CERRADA)
+  saldoInicial      Decimal             @db.Decimal(10, 2)
+  saldoFinal        Decimal?            @db.Decimal(10, 2)
+  fechaApertura     DateTime            @default(now())
+  fechaCierre       DateTime?
+  observaciones     String?
+  usuarioAperturaId Int
+  usuarioCierreId   Int?
+  sucursalId        Int // Ahora obligatorio
+  sucursal          Sucursal            @relation(fields: [sucursalId], references: [id])
+  usuarioApertura   Usuario             @relation("CajaApertura", fields: [usuarioAperturaId], references: [id])
+  usuarioCierre     Usuario?            @relation("CajaCierre", fields: [usuarioCierreId], references: [id])
+  movimientos       MovimientoCaja[]
+  asignaciones      AsignacionTrabajo[] @relation("CajaAsignaciones") // asignaciones de trabajo para esta caja
+}
+
+model MovimientoCaja {
+  id         Int                @id @default(autoincrement())
+  tipo       TipoMovimientoCaja
+  monto      Decimal            @db.Decimal(10, 2)
+  concepto   String
+  metodoPago MetodoPago         @default(EFECTIVO)
+  cajaId     Int
+  caja       Caja               @relation(fields: [cajaId], references: [id])
+  ordenId    Int?
+  orden      Orden?             @relation(fields: [ordenId], references: [id])
+  fechaHora  DateTime           @default(now())
+  usuarioId  Int
+  usuario    Usuario            @relation("MovimientosCaja", fields: [usuarioId], references: [id])
+}
+
+// Modelo para gestionar asignaciones de trabajo entre bartender, mozo y caja
+model AsignacionTrabajo {
+  id              Int      @id @default(autoincrement())
+  bartenderId     Int // ID del usuario con rol BARTENDER
+  bartender       Usuario  @relation("BartenderAsignaciones", fields: [bartenderId], references: [id])
+  mozoId          Int? // ID del usuario con rol MOZO (opcional)
+  mozo            Usuario? @relation("MozoAsignaciones", fields: [mozoId], references: [id])
+  cajaId          Int // ID de la caja asignada
+  caja            Caja     @relation("CajaAsignaciones", fields: [cajaId], references: [id])
+  fechaAsignacion DateTime @default(now())
+  activa          Boolean  @default(true) // Indica si la asignación está activa
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Combo {
+  id          Int             @id @default(autoincrement())
+  nombre      String
+  descripcion String?
+  precio      Decimal         @db.Decimal(10, 2)
+  activo      Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  productos   ComboProducto[]
+  ordenItems  OrdenItem[]
+}
+
+model ComboProducto {
+  id         Int      @id @default(autoincrement())
+  comboId    Int
+  productoId Int
+  cantidad   Int      @default(1)
+  combo      Combo    @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  producto   Producto @relation(fields: [productoId], references: [id])
+}
+
+enum EstadoOrden {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+  ENTREGADO
+  COBRADA
+  CANCELADA
+}
+
+enum TipoMovimiento {
+  ENTRADA
+  SALIDA
+  AJUSTE
+  VENTA
+}
+
+enum EstadoCaja {
+  ABIERTA
+  CERRADA
+}
+
+enum TipoMovimientoCaja {
+  INGRESO
+  EGRESO
+  VENTA
+  DEVOLUCION
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TARJETA
+  TRANSFERENCIA
+  OTRO
+}
+
+enum TipoComplemento {
+  NO_ES_COMPLEMENTO
+  BEBIDA_PARA_LICOR
+  OTRO_COMPLEMENTO
+}
+
+// Modelo para promociones de tragos
+model PromocionTragos {
+  id             Int      @id @default(autoincrement())
+  nombre         String
+  descripcion    String?
+  precio         Decimal  @db.Decimal(10, 2)
+  activo         Boolean  @default(true)
+  cantidadTragos Int      @default(3)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Productos que pueden formar parte de esta promoción
+  productos PromocionProducto[]
+
+  // Relación con los items de orden
+  ordenItems OrdenItem[]
+}
+
+// Relación entre promociones y productos disponibles
+model PromocionProducto {
+  id          Int             @id @default(autoincrement())
+  promocion   PromocionTragos @relation(fields: [promocionId], references: [id])
+  promocionId Int
+  producto    Producto        @relation(fields: [productoId], references: [id])
+  productoId  Int
+
+  @@unique([promocionId, productoId])
+}
